@@ -55,16 +55,22 @@ If the Podman build fails, stop and fix that before launching a long run.
 
 ## Cheap Smoke Test
 
-This checks the workflow runner, event log, monitor summaries, dashboard data,
-and basic API plumbing without burning a real Fable run.
+This checks the workflow runner, event log, dashboard data, external monitor
+script, and basic API plumbing without burning a real Fable run.
 
 ```bash
 scripts/run_fable_big.sh smoke --run-id fable-smoke-001
 scripts/monitor_fable_run.py fable-smoke-001
 ```
 
-The smoke mode uses a dummy problem, one round, no council, no compute worker,
-and cheap model overrides. It is not meant to validate Fable reasoning quality.
+The smoke mode uses a dummy problem, one review round, no council, no compute
+worker, cheap model overrides, and a `$1` run budget by default. It is not
+meant to validate Fable reasoning quality.
+
+By default, monitoring means the external log reader
+`scripts/monitor_fable_run.py`, which does not make model calls. If you also
+want in-workflow LLM monitor summaries, pass `--llm-monitor`; that can add
+extra API calls and latency.
 
 ## Real Monitored Run
 

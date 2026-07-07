@@ -21,6 +21,7 @@ Options:
   --problem PATH                  Problem file for run mode
   --problem-text TEXT             Inline problem text for run mode
   --problem-id ID                 Stable problem id
+  --llm-monitor                   Also enable in-workflow LLM monitor summaries
   --monitor-model MODEL           Monitor model config (default: models/openai/gpt-54-mini)
   --budget-usd USD                Override budget
   --additional-instructions TEXT  Extra run instructions
@@ -48,7 +49,9 @@ has_env_key() {
   if [[ -n "$value" ]]; then
     return 0
   fi
-  if [[ -f .env ]] && grep -Eq "^[[:space:]]*(export[[:space:]]+)?${key}=" .env; then
+  if [[ "${PROOFSTACK_RUN_FABLE_DISABLE_DOTENV:-}" != "1" ]] \
+    && [[ -f .env ]] \
+    && grep -Eq "^[[:space:]]*(export[[:space:]]+)?${key}=" .env; then
     return 0
   fi
   return 1
@@ -91,6 +94,7 @@ RUN_NAME=""
 PROBLEM_ARG=()
 PROBLEM_ID=""
 MONITOR_MODEL="models/openai/gpt-54-mini"
+LLM_MONITOR=false
 BUDGET_USD=""
 ADDITIONAL_INSTRUCTIONS=""
 PASSTHROUGH=()
@@ -124,6 +128,10 @@ while [[ $# -gt 0 ]]; do
     --problem-id)
       PROBLEM_ID="${2:?missing value for --problem-id}"
       shift 2
+      ;;
+    --llm-monitor)
+      LLM_MONITOR=true
+      shift
       ;;
     --monitor-model)
       MONITOR_MODEL="${2:?missing value for --monitor-model}"
@@ -162,7 +170,7 @@ DEFAULT_ARGS=()
 if [[ "$MODE" == "smoke" ]]; then
   PROBLEM_ARG=(
     --problem-text
-    "Infrastructure smoke test. Produce a tiny correct proof that 2+2=4. Keep the output short."
+    "Infrastructure smoke test. Produce a tiny correct proof that 2+2=4. Keep the output short. If your answer is complete, include <ready>true</ready>."
   )
   PROBLEM_ID="${PROBLEM_ID:-fable_smoke_dummy}"
   RUN_NAME="${RUN_NAME:-Fable infrastructure smoke}"
@@ -173,10 +181,11 @@ if [[ "$MODE" == "smoke" ]]; then
     --input enable_council=false
     --input enable_compute=false
     --input enable_final_critic=false
+    --input stop_after_review_round=true
     --model Author=models/openai/gpt-54-mini
     --model ACCritic=models/openai/gpt-54-mini
   )
-  BUDGET_USD="${BUDGET_USD:-5}"
+  BUDGET_USD="${BUDGET_USD:-1}"
 fi
 
 if [[ "$MODE" == "run" && ${#PROBLEM_ARG[@]} -eq 0 ]]; then
@@ -199,9 +208,11 @@ cmd=(
   --problem-id "${PROBLEM_ID:-$RUN_ID}"
   --run-id "$RUN_ID"
   --output "$OUTPUT_ROOT"
-  --monitor
-  --monitor-model "$MONITOR_MODEL"
 )
+
+if [[ "$LLM_MONITOR" == "true" ]]; then
+  cmd+=(--monitor --monitor-model "$MONITOR_MODEL")
+fi
 
 if [[ -n "$RUN_NAME" ]]; then
   cmd+=(--run-name "$RUN_NAME")

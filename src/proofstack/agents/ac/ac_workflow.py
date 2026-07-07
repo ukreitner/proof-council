@@ -1195,11 +1195,12 @@ class ACWorkflow(Agent):
                 bib_path=bib_arg,
                 ship_bib_alongside=inp.ship_bib_alongside,
             )
+            completed_rounds = max(last_round_run, 0)
             terminal_outputs = {
                 "answer_tex": self._encode_run_path(answer_path),
                 "compiled": fixed.compiled,
                 "pages": fixed.pages,
-                "rounds_completed": last_round_run,
+                "rounds_completed": completed_rounds,
                 "early_stopped": early_stopped,
                 "last_critic_accepted": last_critic_accepted,
                 "final_critic_answer_ready": final_critic_answer_ready,
@@ -1236,7 +1237,7 @@ class ACWorkflow(Agent):
                 references_bib=workspace / "references.bib",
                 compiled=fixed.compiled,
                 pages=fixed.pages,
-                rounds_completed=last_round_run,
+                rounds_completed=completed_rounds,
                 early_stopped=early_stopped,
                 last_critic_accepted=last_critic_accepted,
                 final_critic_answer_ready=final_critic_answer_ready,

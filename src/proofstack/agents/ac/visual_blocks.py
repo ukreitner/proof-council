@@ -857,7 +857,7 @@ class ACReturnBlock(ACWorkflow):
             for raw in state.get("review_history", [])
             if isinstance(raw, dict)
         ]
-        last_round_run = int(state.get("last_round_run", -1) or -1)
+        last_round_run = max(int(state.get("last_round_run", -1) or -1), 0)
         last_critic_accepted = reviews[-1].answer_ready if reviews else None
         final_critic_answer_ready = False
         final_critic_mode_run = "not_run"

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import asyncio
 import json
 import os
 import subprocess
@@ -12,6 +13,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 MONITOR_PATH = ROOT / "scripts" / "monitor_fable_run.py"
+sys.path.insert(0, str(ROOT / "src"))
 
 
 def _load_monitor_module():
@@ -168,13 +170,15 @@ class FableMonitoringScriptTests(unittest.TestCase):
             self.assertTrue(log.exists())
             text = log.read_text(encoding="utf-8")
             self.assertIn("fake uv run python scripts/run_workflow.py", text)
-            self.assertIn("--monitor", text)
+            self.assertNotIn("--monitor --monitor-model", text)
             self.assertIn("--input enable_compute=false", text)
+            self.assertIn("--input stop_after_review_round=true", text)
 
     def test_launcher_smoke_fails_fast_without_openai_key(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             env = dict(os.environ)
             env.pop("OPENAI_API_KEY", None)
+            env["PROOFSTACK_RUN_FABLE_DISABLE_DOTENV"] = "1"
             result = subprocess.run(
                 [
                     "bash",
@@ -195,13 +199,124 @@ class FableMonitoringScriptTests(unittest.TestCase):
         self.assertEqual(result.returncode, 78)
         self.assertIn("missing required environment key: OPENAI_API_KEY", result.stderr)
 
-    def test_launcher_defaults_to_monitor_and_smoke_overrides(self) -> None:
+    def test_launcher_defaults_to_external_monitor_and_smoke_overrides(self) -> None:
         text = (ROOT / "scripts" / "run_fable_big.sh").read_text(encoding="utf-8")
 
-        self.assertIn("--monitor", text)
+        self.assertIn("--llm-monitor", text)
         self.assertIn("models/openai/gpt-54-mini", text)
         self.assertIn("--input enable_compute=false", text)
+        self.assertIn("--input stop_after_review_round=true", text)
+        self.assertIn("<ready>true</ready>", text)
+        self.assertIn('BUDGET_USD="${BUDGET_USD:-1}"', text)
         self.assertIn("terminal.log", text)
+
+    def test_launcher_llm_monitor_flag_enables_run_workflow_monitor(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            fake_bin = tmp_path / "bin"
+            fake_bin.mkdir()
+            fake_uv = fake_bin / "uv"
+            fake_uv.write_text(
+                "#!/usr/bin/env bash\n"
+                "printf 'fake uv %s\\n' \"$*\"\n"
+                "while [[ $# -gt 0 ]]; do\n"
+                "  if [[ \"$1\" == \"--run-id\" ]]; then run_id=\"$2\"; shift 2; continue; fi\n"
+                "  if [[ \"$1\" == \"--output\" ]]; then output=\"$2\"; shift 2; continue; fi\n"
+                "  shift\n"
+                "done\n"
+                "mkdir -p \"${output:-outputs}/${run_id:-fake}/resume_cache\"\n"
+                "printf '{\"status\":\"ok\"}\\n' > \"${output:-outputs}/${run_id:-fake}/run-metadata.json\"\n"
+                "printf '{\"ts\":\"2026-07-07T10:00:00.000Z\",\"kind\":\"run.end\",\"payload\":{\"status\":\"ok\"}}\\n' > \"${output:-outputs}/${run_id:-fake}/events.jsonl\"\n",
+                encoding="utf-8",
+            )
+            fake_uv.chmod(0o755)
+            output_root = tmp_path / "outputs"
+            env = dict(os.environ)
+            env["PATH"] = f"{fake_bin}{os.pathsep}{env.get('PATH', '')}"
+            env["OPENAI_API_KEY"] = "fake-key-for-preflight"
+
+            result = subprocess.run(
+                [
+                    "bash",
+                    str(ROOT / "scripts" / "run_fable_big.sh"),
+                    "smoke",
+                    "--llm-monitor",
+                    "--run-id",
+                    "local-smoke-test-llm",
+                    "--output",
+                    str(output_root),
+                ],
+                cwd=ROOT,
+                env=env,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+            text = (output_root / "local-smoke-test-llm" / "terminal.log").read_text(
+                encoding="utf-8"
+            )
+            self.assertIn("--monitor --monitor-model models/openai/gpt-54-mini", text)
+
+    def test_return_block_clamps_negative_round_count(self) -> None:
+        from proofstack.agents.ac import visual_blocks
+        from proofstack.agents.ac.ac_workflow import _CompileResult
+        from proofstack.context import RunContext
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            workspace = root / "workspace"
+            workspace.mkdir()
+            (workspace / "answer.tex").write_text(
+                "\\documentclass{article}\\begin{document}Done.\\end{document}",
+                encoding="utf-8",
+            )
+            (workspace / "research_notes.tex").write_text("", encoding="utf-8")
+            (workspace / "references.bib").write_text("", encoding="utf-8")
+
+            def fake_compile(tex, **_kwargs):
+                return _CompileResult(
+                    tex=tex,
+                    tex_path=None,
+                    pdf_path=None,
+                    compiled=True,
+                    pages=1,
+                )
+
+            old_compile = visual_blocks._simple_compile_latex
+            visual_blocks._simple_compile_latex = fake_compile
+            try:
+                ctx = RunContext.create(run_id="test", root_workdir=root / "outputs")
+                block = visual_blocks.ACReturnBlock(ctx)
+                out = asyncio.run(
+                    block(
+                        state={
+                            "inputs": {
+                                "problem": "P",
+                                "problem_id": "p",
+                                "n_rounds": 1,
+                            },
+                            "workspace": str(workspace),
+                            "last_round_run": -1,
+                            "early_stopped": True,
+                            "review_history": [
+                                {
+                                    "review_md": "ok",
+                                    "answer_ready": True,
+                                    "mode": "fresh",
+                                    "parse_failed": False,
+                                    "messages_after": [],
+                                }
+                            ],
+                        }
+                    )
+                )
+            finally:
+                visual_blocks._simple_compile_latex = old_compile
+
+        self.assertEqual(out.rounds_completed, 0)
+        self.assertTrue(out.early_stopped)
 
 
 if __name__ == "__main__":
