@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -119,6 +120,80 @@ class FableMonitoringScriptTests(unittest.TestCase):
         self.assertIn("Podman", text)
         self.assertIn("scripts/monitor_fable_run.py", text)
         self.assertIn("scripts/run_fable_big.sh smoke", text)
+
+    def test_launcher_smoke_runs_with_fake_uv_on_empty_passthrough(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            fake_bin = tmp_path / "bin"
+            fake_bin.mkdir()
+            fake_uv = fake_bin / "uv"
+            fake_uv.write_text(
+                "#!/usr/bin/env bash\n"
+                "printf 'fake uv %s\\n' \"$*\"\n"
+                "while [[ $# -gt 0 ]]; do\n"
+                "  if [[ \"$1\" == \"--run-id\" ]]; then run_id=\"$2\"; shift 2; continue; fi\n"
+                "  if [[ \"$1\" == \"--output\" ]]; then output=\"$2\"; shift 2; continue; fi\n"
+                "  shift\n"
+                "done\n"
+                "mkdir -p \"${output:-outputs}/${run_id:-fake}/resume_cache\"\n"
+                "printf '{\"status\":\"ok\"}\\n' > \"${output:-outputs}/${run_id:-fake}/run-metadata.json\"\n"
+                "printf '{\"ts\":\"2026-07-07T10:00:00.000Z\",\"kind\":\"run.end\",\"payload\":{\"status\":\"ok\"}}\\n' > \"${output:-outputs}/${run_id:-fake}/events.jsonl\"\n",
+                encoding="utf-8",
+            )
+            fake_uv.chmod(0o755)
+            output_root = tmp_path / "outputs"
+            env = dict(os.environ)
+            env["PATH"] = f"{fake_bin}{os.pathsep}{env.get('PATH', '')}"
+            env["OPENAI_API_KEY"] = "fake-key-for-preflight"
+
+            result = subprocess.run(
+                [
+                    "bash",
+                    str(ROOT / "scripts" / "run_fable_big.sh"),
+                    "smoke",
+                    "--run-id",
+                    "local-smoke-test",
+                    "--output",
+                    str(output_root),
+                ],
+                cwd=ROOT,
+                env=env,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+            log = output_root / "local-smoke-test" / "terminal.log"
+            self.assertTrue(log.exists())
+            text = log.read_text(encoding="utf-8")
+            self.assertIn("fake uv run python scripts/run_workflow.py", text)
+            self.assertIn("--monitor", text)
+            self.assertIn("--input enable_compute=false", text)
+
+    def test_launcher_smoke_fails_fast_without_openai_key(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            env = dict(os.environ)
+            env.pop("OPENAI_API_KEY", None)
+            result = subprocess.run(
+                [
+                    "bash",
+                    str(ROOT / "scripts" / "run_fable_big.sh"),
+                    "smoke",
+                    "--run-id",
+                    "missing-key-smoke",
+                    "--output",
+                    str(Path(tmp) / "outputs"),
+                ],
+                cwd=ROOT,
+                env=env,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+        self.assertEqual(result.returncode, 78)
+        self.assertIn("missing required environment key: OPENAI_API_KEY", result.stderr)
 
     def test_launcher_defaults_to_monitor_and_smoke_overrides(self) -> None:
         text = (ROOT / "scripts" / "run_fable_big.sh").read_text(encoding="utf-8")

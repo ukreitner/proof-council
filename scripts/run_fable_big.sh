@@ -38,6 +38,32 @@ After launch, check the run with:
 EOF
 }
 
+now_iso() {
+  date '+%Y-%m-%dT%H:%M:%S%z'
+}
+
+has_env_key() {
+  key="$1"
+  eval "value=\${$key:-}"
+  if [[ -n "$value" ]]; then
+    return 0
+  fi
+  if [[ -f .env ]] && grep -Eq "^[[:space:]]*(export[[:space:]]+)?${key}=" .env; then
+    return 0
+  fi
+  return 1
+}
+
+require_env_key() {
+  key="$1"
+  if has_env_key "$key"; then
+    return 0
+  fi
+  echo "missing required environment key: $key" >&2
+  echo "Set it in the shell or in .env before starting this monitored run." >&2
+  return 78
+}
+
 if [[ $# -lt 1 ]]; then
   usage
   exit 64
@@ -143,7 +169,7 @@ if [[ "$MODE" == "smoke" ]]; then
   WORKFLOW="${WORKFLOW:-author_critic}"
   DEFAULT_ARGS=(
     --input n_rounds=1
-    --input full_critic_interval=99
+    --input full_critic_interval=20
     --input enable_council=false
     --input enable_compute=false
     --input enable_final_critic=false
@@ -157,6 +183,10 @@ if [[ "$MODE" == "run" && ${#PROBLEM_ARG[@]} -eq 0 ]]; then
   echo "run mode requires --problem or --problem-text" >&2
   usage >&2
   exit 64
+fi
+
+if [[ "$MODE" == "smoke" ]]; then
+  require_env_key OPENAI_API_KEY
 fi
 
 mkdir -p "$OUTPUT_ROOT/$RUN_ID"
@@ -182,11 +212,15 @@ fi
 if [[ -n "$ADDITIONAL_INSTRUCTIONS" ]]; then
   cmd+=(--additional-instructions "$ADDITIONAL_INSTRUCTIONS")
 fi
-cmd+=("${DEFAULT_ARGS[@]}")
-cmd+=("${PASSTHROUGH[@]}")
+if [[ ${#DEFAULT_ARGS[@]} -gt 0 ]]; then
+  cmd+=("${DEFAULT_ARGS[@]}")
+fi
+if [[ ${#PASSTHROUGH[@]} -gt 0 ]]; then
+  cmd+=("${PASSTHROUGH[@]}")
+fi
 
 {
-  echo "started_at: $(date -Is)"
+  echo "started_at: $(now_iso)"
   echo "host: $(hostname)"
   echo "run_id: $RUN_ID"
   echo "workflow: $WORKFLOW"
@@ -204,12 +238,25 @@ set -e
 
 {
   echo
-  echo "finished_at: $(date -Is)"
+  echo "finished_at: $(now_iso)"
   echo "exit_status: $status"
+  echo
+  echo "Post-run monitor:"
+} | tee -a "$LOG"
+
+set +e
+scripts/monitor_fable_run.py "$RUN_ID" --output "$OUTPUT_ROOT" 2>&1 | tee -a "$LOG"
+monitor_status=${PIPESTATUS[0]}
+set -e
+
+{
   echo
   echo "Next checks:"
   echo "  scripts/monitor_fable_run.py $RUN_ID --output $OUTPUT_ROOT"
   echo "  scripts/watch_run.sh $RUN_ID 5005"
 } | tee -a "$LOG"
 
-exit "$status"
+if [[ "$status" -ne 0 ]]; then
+  exit "$status"
+fi
+exit "$monitor_status"
