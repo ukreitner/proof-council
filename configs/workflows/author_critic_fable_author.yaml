@@ -11,7 +11,8 @@ inputs:
   compute_model: gpt-5.5
   compute_reasoning_effort: xhigh
   compute_cost_config: models/openai/gpt-55-high
-  compute_sandbox_backend: subprocess
+  compute_sandbox_backend: docker
+  compute_container_runtime: podman
   compute_codex_sandbox: docker-bypass
   enable_final_critic: false
   council_models:

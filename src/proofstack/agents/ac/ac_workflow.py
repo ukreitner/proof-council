@@ -395,6 +395,9 @@ class ACWorkflow(Agent):
         # ``Compute.Inputs.sandbox_backend``.
         compute_sandbox_backend: str = "docker"
         compute_docker_image: str = "proofstack-pwc-sandbox:latest"
+        # Docker-compatible runtime executable for the compute container.
+        # Use ``podman`` on D-MATH/cluster hosts where Docker is unavailable.
+        compute_container_runtime: str = "docker"
         # Codex sandbox flag: ``auto`` | ``workspace-write`` |
         # ``docker-bypass`` | ``none``. ``auto`` resolves correctly
         # based on the backend.
@@ -2068,6 +2071,7 @@ class ACWorkflow(Agent):
                 cost_config=inp.compute_cost_config,
                 sandbox_backend=inp.compute_sandbox_backend,
                 docker_image=inp.compute_docker_image,
+                container_runtime=inp.compute_container_runtime,
                 codex_sandbox=inp.compute_codex_sandbox,
             )
         except asyncio.CancelledError:

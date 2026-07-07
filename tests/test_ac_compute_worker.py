@@ -21,6 +21,7 @@ from proofstack.agents.ac.compute import (  # noqa: E402
 from proofstack.context import RunContext  # noqa: E402
 from proofstack.kinds.cli import CLIDoneRecord  # noqa: E402
 from proofstack.sandbox.base import SandboxSpec  # noqa: E402
+from proofstack.sandbox.docker import DockerSandbox  # noqa: E402
 
 
 class FakeSandbox(SimpleNamespace):
@@ -50,6 +51,31 @@ def test_compute_codex_command_uses_current_exec_flags() -> None:
     assert "--sandbox" not in cmd
     assert "--dangerously-bypass-approvals-and-sandbox" in cmd
     assert cmd[-1] == "-"
+
+
+def test_container_runtime_can_use_podman_for_compute_sandbox() -> None:
+    with tempfile.TemporaryDirectory() as temp_dir:
+        sandbox = DockerSandbox(
+            SandboxSpec(
+                backend="docker",
+                container_runtime="podman",
+                docker_image="proofstack-pwc-sandbox:latest",
+            ),
+            root=Path(temp_dir),
+        )
+
+        cmd = sandbox._build_docker_cmd(
+            ["true"],
+            env_extra=None,
+            extra_path=[],
+            cwd=None,
+            interactive=False,
+            container_name="proofstack-test",
+        )
+
+        assert cmd[:2] == ["podman", "run"]
+
+
 def test_dockerfile_pins_and_smokes_codex_cli() -> None:
     text = (ROOT / "Dockerfile").read_text(encoding="utf-8")
     pwc_text = (ROOT / "deploy" / "sandbox" / "Dockerfile.pwc").read_text(

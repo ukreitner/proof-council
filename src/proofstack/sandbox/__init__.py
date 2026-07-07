@@ -4,7 +4,13 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-from proofstack.sandbox.base import CommandResult, Sandbox, SandboxBackend, SandboxSpec
+from proofstack.sandbox.base import (
+    CommandResult,
+    Sandbox,
+    SandboxBackend,
+    SandboxSpec,
+    resolve_container_runtime,
+)
 from proofstack.sandbox.docker import (
     DockerSandbox,
     DockerSandboxError,
@@ -36,21 +42,22 @@ def make_sandbox(spec: SandboxSpec, *, root: Path | None = None) -> Sandbox:
     """
     backend = resolve_backend(spec)
     if backend == "docker":
-        if not check_image_available(spec.docker_image):
+        runtime = resolve_container_runtime(spec)
+        if not check_image_available(spec.docker_image, container_runtime=runtime):
             # The PWC sandbox image needs the explicit -f Dockerfile.pwc
             # flag because it's the second stage on top of the base
             # proofstack-sandbox image. The base image follows the
             # default Dockerfile naming and doesn't.
             if "pwc" in spec.docker_image:
                 build_cmd = (
-                    "docker build -t proofstack-sandbox:latest deploy/sandbox/ && "
-                    "docker build -t " + spec.docker_image
+                    f"{runtime} build -t proofstack-sandbox:latest deploy/sandbox/ && "
+                    f"{runtime} build -t " + spec.docker_image
                     + " -f deploy/sandbox/Dockerfile.pwc deploy/sandbox/"
                 )
             else:
-                build_cmd = f"docker build -t {spec.docker_image} deploy/sandbox/"
+                build_cmd = f"{runtime} build -t {spec.docker_image} deploy/sandbox/"
             raise DockerSandboxError(
-                f"docker image {spec.docker_image!r} is not built. Run:\n"
+                f"container image {spec.docker_image!r} is not built for {runtime!r}. Run:\n"
                 f"    {build_cmd}\n"
                 f"or set PROOFSTACK_SANDBOX_BACKEND=subprocess to skip the "
                 f"container sandbox."
@@ -69,5 +76,6 @@ __all__ = [
     "SubprocessSandbox",
     "check_image_available",
     "make_sandbox",
+    "resolve_container_runtime",
     "resolve_backend",
 ]

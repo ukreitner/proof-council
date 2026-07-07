@@ -12,6 +12,7 @@ from typing import Iterable, Literal, Mapping
 
 
 SandboxBackend = Literal["subprocess", "docker"]
+DEFAULT_CONTAINER_RUNTIME = "docker"
 
 
 # Standard env vars we always pass through; provider keys are added per call.
@@ -67,6 +68,9 @@ class SandboxSpec:
     backend: SandboxBackend = "docker"
 
     # --- Docker-backend-specific knobs -------------------------------------
+    # Docker-compatible container runtime executable. Keep the backend name
+    # as "docker" for compatibility, but allow rootless Podman on clusters.
+    container_runtime: str = DEFAULT_CONTAINER_RUNTIME
     # Image to run. Must exist locally (we don't pull automatically).
     # Build with `docker build -t proofstack-sandbox:latest deploy/sandbox/`.
     docker_image: str = "proofstack-sandbox:latest"
@@ -102,6 +106,16 @@ class SandboxSpec:
         env["HOME"] = str(sandbox_root)
         env["TMPDIR"] = str(sandbox_root)
         return env
+
+
+def resolve_container_runtime(spec: SandboxSpec) -> str:
+    """Return the Docker-compatible runtime executable for container sandboxes."""
+
+    override = os.environ.get("PROOFSTACK_CONTAINER_RUNTIME", "").strip()
+    if override:
+        return override
+    configured = (spec.container_runtime or DEFAULT_CONTAINER_RUNTIME).strip()
+    return configured or DEFAULT_CONTAINER_RUNTIME
 
 
 @dataclass
@@ -172,7 +186,9 @@ class Sandbox:
 
 __all__ = [
     "CommandResult",
+    "DEFAULT_CONTAINER_RUNTIME",
     "DEFAULT_ENV_ALLOWLIST",
     "Sandbox",
     "SandboxSpec",
+    "resolve_container_runtime",
 ]

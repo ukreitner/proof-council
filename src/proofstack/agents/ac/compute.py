@@ -56,6 +56,7 @@ DEFAULT_SOFT_TIMEOUT_S = 3600
 DEFAULT_HARD_TIMEOUT_S = 4500
 DEFAULT_SANDBOX_BACKEND = "docker"
 DEFAULT_DOCKER_IMAGE = "proofstack-pwc-sandbox:latest"
+DEFAULT_CONTAINER_RUNTIME = "docker"
 # ``auto`` resolves to ``--dangerously-bypass-approvals-and-sandbox``
 # under docker and ``--sandbox workspace-write`` under subprocess.
 DEFAULT_CODEX_SANDBOX = "auto"
@@ -258,6 +259,9 @@ class Compute(CLIAgent):
         sandbox_backend: str = DEFAULT_SANDBOX_BACKEND
         # Optional docker image override when ``sandbox_backend=docker``.
         docker_image: str = DEFAULT_DOCKER_IMAGE
+        # Docker-compatible runtime executable used by the container
+        # backend. Set to ``podman`` on clusters that disallow Docker.
+        container_runtime: str = DEFAULT_CONTAINER_RUNTIME
         # Codex CLI sandbox flag: ``auto`` (default — bypass under
         # docker, workspace-write under subprocess), ``workspace-write``,
         # ``docker-bypass``, or ``none``.
@@ -299,6 +303,7 @@ class Compute(CLIAgent):
             memory_gb=8,
             timeout_s=DEFAULT_HARD_TIMEOUT_S,
             backend=str(inp.sandbox_backend or DEFAULT_SANDBOX_BACKEND),  # type: ignore[attr-defined,arg-type]
+            container_runtime=str(inp.container_runtime or DEFAULT_CONTAINER_RUNTIME),  # type: ignore[attr-defined]
             docker_image=str(inp.docker_image or DEFAULT_DOCKER_IMAGE),  # type: ignore[attr-defined]
             docker_no_new_privileges=False,
             docker_extra_args=docker_extra_args,

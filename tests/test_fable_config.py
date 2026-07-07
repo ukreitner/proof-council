@@ -59,9 +59,17 @@ class FableModelConfigTests(unittest.TestCase):
 
 
 class FablePresetTests(unittest.TestCase):
+    def _assert_podman_compute(self, preset_name: str) -> None:
+        preset = load_preset(preset_name)
+
+        self.assertEqual(preset.inputs["compute_sandbox_backend"], "docker")
+        self.assertEqual(preset.inputs["compute_container_runtime"], "podman")
+        self.assertEqual(preset.inputs["compute_codex_sandbox"], "docker-bypass")
+
     def test_fable_author_preset_swaps_author_only(self) -> None:
         preset = load_preset("author_critic_fable_author")
 
+        self._assert_podman_compute("author_critic_fable_author")
         self.assertEqual(
             preset.component_configs["Author"]["model"],
             "models/anthropic/fable_5_max",
@@ -75,6 +83,7 @@ class FablePresetTests(unittest.TestCase):
     def test_fable_council_preset_swaps_anthropic_seat_only(self) -> None:
         preset = load_preset("author_critic_fable_council")
 
+        self._assert_podman_compute("author_critic_fable_council")
         self.assertEqual(
             preset.component_configs["Author"]["model"],
             "models/openai/gpt-55-pro",

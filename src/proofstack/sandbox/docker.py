@@ -26,12 +26,12 @@ import uuid
 from pathlib import Path
 from typing import Iterable, Mapping
 
-from proofstack.sandbox.base import CommandResult, Sandbox
+from proofstack.sandbox.base import CommandResult, Sandbox, resolve_container_runtime
 from proofstack.sandbox.subprocess import _StreamingProcess
 
 
-async def _docker_kill(container_name: str) -> None:
-    """Best-effort ``docker kill <name>``.
+async def _docker_kill(container_name: str, *, runtime: str) -> None:
+    """Best-effort ``<runtime> kill <name>``.
 
     Killing the ``docker run`` CLI client does NOT propagate to the
     container — dockerd sees a detached client but PID 1 in the
@@ -41,7 +41,7 @@ async def _docker_kill(container_name: str) -> None:
     """
     try:
         proc = await asyncio.create_subprocess_exec(
-            "docker", "kill", container_name,
+            runtime, "kill", container_name,
             stdout=asyncio.subprocess.DEVNULL,
             stderr=asyncio.subprocess.DEVNULL,
         )
@@ -102,9 +102,11 @@ class DockerSandbox(Sandbox):
                 stderr=asyncio.subprocess.PIPE,
             )
         except FileNotFoundError as e:
+            runtime = resolve_container_runtime(self.spec)
             raise DockerSandboxError(
-                "docker binary not found — install Docker Desktop (Windows) "
-                "or the Docker engine (Linux), or set "
+                f"container runtime {runtime!r} not found — install Docker "
+                "Desktop / Docker Engine or Podman, set "
+                "PROOFSTACK_CONTAINER_RUNTIME to an available runtime, or set "
                 "PROOFSTACK_SANDBOX_BACKEND=subprocess to bypass."
             ) from e
         try:
@@ -113,7 +115,7 @@ class DockerSandbox(Sandbox):
             )
             returncode = proc.returncode if proc.returncode is not None else -1
         except asyncio.TimeoutError:
-            await _docker_kill(container_name)
+            await _docker_kill(container_name, runtime=resolve_container_runtime(self.spec))
             try:
                 proc.kill()
                 await proc.communicate()
@@ -157,9 +159,11 @@ class DockerSandbox(Sandbox):
                 stderr=asyncio.subprocess.PIPE,
             )
         except FileNotFoundError as e:
+            runtime = resolve_container_runtime(self.spec)
             raise DockerSandboxError(
-                "docker binary not found — install Docker Desktop (Windows) "
-                "or the Docker engine (Linux), or set "
+                f"container runtime {runtime!r} not found — install Docker "
+                "Desktop / Docker Engine or Podman, set "
+                "PROOFSTACK_CONTAINER_RUNTIME to an available runtime, or set "
                 "PROOFSTACK_SANDBOX_BACKEND=subprocess to bypass."
             ) from e
         deadline = (
@@ -170,6 +174,7 @@ class DockerSandbox(Sandbox):
             cmd=docker_cmd,
             deadline=deadline,
             container_name=container_name,
+            container_runtime=resolve_container_runtime(self.spec),
         )
 
     # --- helpers ----------------------------------------------------------
@@ -184,7 +189,8 @@ class DockerSandbox(Sandbox):
         interactive: bool,
         container_name: str,
     ) -> list[str]:
-        args: list[str] = ["docker", "run", "--rm", "--name", container_name]
+        runtime = resolve_container_runtime(self.spec)
+        args: list[str] = [runtime, "run", "--rm", "--name", container_name]
         if interactive:
             args += ["-i"]
         args += [
@@ -276,26 +282,31 @@ class _DockerStreamingProcess(_StreamingProcess):
     the named container first so nothing orphans.
     """
 
-    def __init__(self, *, container_name: str, **kw) -> None:
+    def __init__(self, *, container_name: str, container_runtime: str, **kw) -> None:
         super().__init__(**kw)
         self.container_name = container_name
+        self.container_runtime = container_runtime
 
     async def terminate(self) -> None:
         if self.proc.returncode is None:
-            await _docker_kill(self.container_name)
+            await _docker_kill(self.container_name, runtime=self.container_runtime)
         await super().terminate()
 
 
-def check_image_available(image: str = "proofstack-sandbox:latest") -> bool:
-    """Returns True if the given docker image is built locally.
+def check_image_available(
+    image: str = "proofstack-sandbox:latest",
+    *,
+    container_runtime: str = "docker",
+) -> bool:
+    """Returns True if the given image is built locally for the runtime.
 
     Non-async because it's called at startup / construction time.
-    Uses ``docker image inspect`` which is cheap.
+    Uses ``<runtime> image inspect`` which is cheap.
     """
     import subprocess as _sp
     try:
         res = _sp.run(
-            ["docker", "image", "inspect", image],
+            [container_runtime, "image", "inspect", image],
             stdout=_sp.DEVNULL,
             stderr=_sp.DEVNULL,
             timeout=5,
